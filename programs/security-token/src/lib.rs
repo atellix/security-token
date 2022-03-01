@@ -10,7 +10,6 @@ pub enum TokenState {
     Frozen,
 }
 
-
 #[program]
 pub mod security_token {
     use super::*;
@@ -26,7 +25,10 @@ pub mod security_token {
         Ok(())
     }
 
-    pub fn create_account(ctx: Context<CreateAccount>) -> ProgramResult {
+    pub fn create_account(ctx: Context<CreateAccount>,
+        _inp_bump: u8,
+        inp_uuid: u128,
+    ) -> ProgramResult {
         Ok(())
     }
 
@@ -97,7 +99,14 @@ pub struct Mint {}
 pub struct Burn {}
 
 #[derive(Accounts)]
-pub struct CreateAccount {}
+#[instruction(_inp_bump: u8, inp_uuid: u128)]
+pub struct CreateAccount {
+    #[account(mut, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump = inp_bump, payer = owner)]
+    pub account: Account<'info, SecurityTokenAccount>,
+    pub mint: Account<'info, SecurityTokenMint>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+}
 
 #[derive(Accounts)]
 pub struct UpdateAccount {}
