@@ -83,7 +83,7 @@ pub mod security_token {
         require!(!to_account.frozen, ErrorCode::AccountFrozen);
         let from_account = &mut ctx.accounts.from;
         require!(!from_account.frozen, ErrorCode::AccountFrozen);
-        // TODO: Validate network authorities
+        // TODO: Validate network authority data
         if from_account.amount < inp_amount {
             return Err(error!(ErrorCode::InsufficientTokens));
         }
@@ -92,15 +92,15 @@ pub mod security_token {
         Ok(())
     }
 
-    pub fn create_allowance(_ctx: Context<CreateAllowance>) -> anchor_lang::Result<()> {
+    pub fn add_delegate(_ctx: Context<AddDelegate>) -> anchor_lang::Result<()> {
         Ok(())
     }
 
-    pub fn update_allowance(_ctx: Context<UpdateAllowance>) -> anchor_lang::Result<()> {
+    pub fn update_delegate(_ctx: Context<UpdateDelegate>) -> anchor_lang::Result<()> {
         Ok(())
     }
 
-    pub fn close_allowance(_ctx: Context<CloseAllowance>) -> anchor_lang::Result<()> {
+    pub fn remove_delegate(_ctx: Context<RemoveDelegate>) -> anchor_lang::Result<()> {
         Ok(())
     }
 
@@ -197,13 +197,13 @@ pub struct Transfer<'info> {
 }
 
 #[derive(Accounts)]
-pub struct CreateAllowance {}
+pub struct AddDelegate {}
 
 #[derive(Accounts)]
-pub struct UpdateAllowance {}
+pub struct UpdateDelegate {}
 
 #[derive(Accounts)]
-pub struct CloseAllowance {}
+pub struct RemoveDelegate {}
 
 #[derive(Accounts)]
 pub struct DelegatedTransfer {}
