@@ -36,7 +36,9 @@ pub mod security_token {
         Ok(())
     }
 
-    pub fn burn(_ctx: Context<Burn>) -> anchor_lang::Result<()> {
+    pub fn burn(ctx: Context<Burn>,
+        inp_amount: u64,
+    ) -> anchor_lang::Result<()> {
         let mint = &mut ctx.accounts.mint;
         require_keys_eq!(mint.manager, ctx.accounts.manager.key());
         mint.supply = mint.supply.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
@@ -74,13 +76,19 @@ pub mod security_token {
         Ok(())
     }
 
-    pub fn transfer(ctx: Context<Transfer>
+    pub fn transfer(ctx: Context<Transfer>,
         inp_amount: u64,
     ) -> anchor_lang::Result<()> {
         let to_account = &mut ctx.accounts.to;
         require!(!to_account.frozen, ErrorCode::AccountFrozen);
         let from_account = &mut ctx.accounts.from;
         require!(!from_account.frozen, ErrorCode::AccountFrozen);
+        // TODO: Validate network authorities
+        if from_account.amount < inp_amount {
+            return Err(error!(ErrorCode::InsufficientTokens));
+        }
+        from_account.amount = from_account.amount.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
+        to_account.amount = to_account.amount.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
         Ok(())
     }
 
@@ -202,6 +210,8 @@ pub struct DelegatedTransfer {}
 
 #[error_code]
 pub enum ErrorCode {
+    #[msg("Insufficient tokens")]
+    InsufficientTokens,
     #[msg("Account frozen")]
     AccountFrozen,
     #[msg("Overflow")]
