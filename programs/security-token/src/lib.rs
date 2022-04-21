@@ -1,6 +1,16 @@
+use std::{ result::Result as FnResult };
+use solana_program::{ account_info::AccountInfo };
 use anchor_lang::prelude::*;
 
+use net_authority::TokenGroupApproval;
+
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+
+#[inline]
+fn load_struct<T: AccountDeserialize>(acc: &AccountInfo) -> FnResult<T, ProgramError> {
+    let mut data: &[u8] = &acc.try_borrow_data()?;
+    Ok(T::try_deserialize(&mut data)?)
+}
 
 #[program]
 pub mod security_token {
@@ -83,7 +93,24 @@ pub mod security_token {
         require!(!to_account.frozen, ErrorCode::AccountFrozen);
         let from_account = &mut ctx.accounts.from;
         require!(!from_account.frozen, ErrorCode::AccountFrozen);
-        // TODO: Validate network authority data
+        require_keys_eq!(from_account.mint, to_account.mint, ErrorCode::InvalidMint);
+        require_keys_eq!(from_account.group, to_account.group, ErrorCode::InvalidGroup);
+        require_keys_eq!(from_account.net_auth, to_account.net_auth, ErrorCode::InvalidNetAuth);
+
+        // Validate network authority data: from
+        let from_auth = &ctx.accounts.from_auth.to_account_info();
+        require_keys_eq!(*from_auth.owner, from_account.net_auth, ErrorCode::InvalidAuthOwnerFrom);
+        let from_approval = load_struct::<TokenGroupApproval>(from_auth)?;
+        require!(!from_approval.active, ErrorCode::InactiveApprovalFrom);
+        require_keys_eq!(from_approval.group, from_account.group, ErrorCode::InvalidGroupFrom);
+
+        // Validate network authority data: to
+        let to_auth = &ctx.accounts.to_auth.to_account_info();
+        require_keys_eq!(*to_auth.owner, to_account.net_auth, ErrorCode::InvalidAuthOwnerTo);
+        let to_approval = load_struct::<TokenGroupApproval>(to_auth)?;
+        require!(!to_approval.active, ErrorCode::InactiveApprovalTo);
+        require_keys_eq!(to_approval.group, to_account.group, ErrorCode::InvalidGroupTo);
+
         if from_account.amount < inp_amount {
             return Err(error!(ErrorCode::InsufficientTokens));
         }
@@ -119,7 +146,7 @@ pub struct SecurityTokenMint {
     pub group: Pubkey,
     pub supply: u64,
     pub decimals: u8,
-    pub url: String, // Max len 128
+    pub url: String, // Max len 124
 }
 // Size: 8 + 16 + 32 + 32 + 32 + 8 + 1 + 128
 
@@ -210,6 +237,28 @@ pub struct DelegatedTransfer {}
 
 #[error_code]
 pub enum ErrorCode {
+    #[msg("Invalid approval owner from")]
+    InvalidAuthOwnerFrom,
+    #[msg("Invalid approval owner to")]
+    InvalidAuthOwnerTo,
+    #[msg("Invalid group from")]
+    InvalidGroupFrom,
+    #[msg("Invalid group to")]
+    InvalidGroupTo,
+    #[msg("Invalid group")] // Non-matching
+    InvalidGroup,
+    #[msg("Invalid mint from")]
+    InvalidMintFrom,
+    #[msg("Invalid mint to")]
+    InvalidMintTo,
+    #[msg("Invalid mint")] // Non-matching
+    InvalidMint,
+    #[msg("Invalid network authority")] // Non-matching
+    InvalidNetAuth,
+    #[msg("Inactive approval from")]
+    InactiveApprovalFrom,
+    #[msg("Inactive approval to")]
+    InactiveApprovalTo,
     #[msg("Insufficient tokens")]
     InsufficientTokens,
     #[msg("Account frozen")]
