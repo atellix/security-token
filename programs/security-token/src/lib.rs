@@ -60,10 +60,20 @@ pub mod security_token {
         Ok(())
     }
 
+    // Approval from the network authority for the mint group is required to create account.
+    // Account owners, or the mint manager, can create new accounts.
     pub fn create_account(ctx: Context<CreateAccount>,
         _inp_bump: u8,
         inp_uuid: u128,
     ) -> anchor_lang::Result<()> {
+
+        // Verify authority to create token account
+        let create_auth = &ctx.accounts.create_auth.to_account_info();
+        require_keys_eq!(*create_auth.owner, ctx.accounts.mint.net_auth, ErrorCode::InvalidAuthOwner);
+        let create_approval = load_struct::<TokenGroupApproval>(create_auth)?;
+        require!(!create_approval.active, ErrorCode::InactiveApproval);
+        require_keys_eq!(create_approval.group, ctx.accounts.mint.group, ErrorCode::InvalidGroup);
+
         let account = &mut ctx.accounts.account;
         account.uuid = inp_uuid;
         account.owner = *ctx.accounts.owner.to_account_info().key;
@@ -78,10 +88,22 @@ pub mod security_token {
         Ok(())
     }
 
-    pub fn update_account(_ctx: Context<UpdateAccount>) -> anchor_lang::Result<()> {
+    // Only the mint manager can update accounts
+    pub fn update_account(ctx: Context<UpdateAccount>,
+        inp_locked_until: i64,
+        inp_frozen: bool,
+    ) -> anchor_lang::Result<()> {
+        let account = &mut ctx.accounts.account;
+        require_keys_eq!(account.mint, ctx.accounts.mint.key(), ErrorCode::InvalidMint);
+        require_keys_eq!(ctx.accounts.manager.key(), ctx.accounts.mint.manager, ErrorCode::InvalidMint);
+
+        account.locked_until = inp_locked_until;
+        account.frozen = inp_frozen;
+
         Ok(())
     }
 
+    // Token balance must be 0 to close an account. The account owner, close authority, or mint manager can close an account.
     pub fn close_account(_ctx: Context<CloseAccount>) -> anchor_lang::Result<()> {
         Ok(())
     }
@@ -99,17 +121,17 @@ pub mod security_token {
 
         // Validate network authority data: from
         let from_auth = &ctx.accounts.from_auth.to_account_info();
-        require_keys_eq!(*from_auth.owner, from_account.net_auth, ErrorCode::InvalidAuthOwnerFrom);
+        require_keys_eq!(*from_auth.owner, from_account.net_auth, ErrorCode::InvalidAuthOwner);
         let from_approval = load_struct::<TokenGroupApproval>(from_auth)?;
-        require!(!from_approval.active, ErrorCode::InactiveApprovalFrom);
-        require_keys_eq!(from_approval.group, from_account.group, ErrorCode::InvalidGroupFrom);
+        require!(!from_approval.active, ErrorCode::InactiveApproval);
+        require_keys_eq!(from_approval.group, from_account.group, ErrorCode::InvalidGroup);
 
         // Validate network authority data: to
         let to_auth = &ctx.accounts.to_auth.to_account_info();
-        require_keys_eq!(*to_auth.owner, to_account.net_auth, ErrorCode::InvalidAuthOwnerTo);
+        require_keys_eq!(*to_auth.owner, to_account.net_auth, ErrorCode::InvalidAuthOwner);
         let to_approval = load_struct::<TokenGroupApproval>(to_auth)?;
-        require!(!to_approval.active, ErrorCode::InactiveApprovalTo);
-        require_keys_eq!(to_approval.group, to_account.group, ErrorCode::InvalidGroupTo);
+        require!(!to_approval.active, ErrorCode::InactiveApproval);
+        require_keys_eq!(to_approval.group, to_account.group, ErrorCode::InvalidGroup);
 
         if from_account.amount < inp_amount {
             return Err(error!(ErrorCode::InsufficientTokens));
@@ -203,11 +225,17 @@ pub struct CreateAccount<'info> {
     pub mint: Account<'info, SecurityTokenMint>,
     #[account(mut)]
     pub owner: Signer<'info>,
+    pub create_auth: UncheckedAccount<'info>,
     pub close_auth: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
-pub struct UpdateAccount {}
+pub struct UpdateAccount<'info> {
+    #[account(mut)]
+    pub account: Account<'info, SecurityTokenAccount>,
+    pub mint: Account<'info, SecurityTokenMint>,
+    pub manager: Signer<'info>,
+}
 
 #[derive(Accounts)]
 pub struct CloseAccount {}
@@ -237,28 +265,16 @@ pub struct DelegatedTransfer {}
 
 #[error_code]
 pub enum ErrorCode {
-    #[msg("Invalid approval owner from")]
-    InvalidAuthOwnerFrom,
-    #[msg("Invalid approval owner to")]
-    InvalidAuthOwnerTo,
-    #[msg("Invalid group from")]
-    InvalidGroupFrom,
-    #[msg("Invalid group to")]
-    InvalidGroupTo,
-    #[msg("Invalid group")] // Non-matching
+    #[msg("Invalid approval owner")]
+    InvalidAuthOwner,
+    #[msg("Invalid group")]
     InvalidGroup,
-    #[msg("Invalid mint from")]
-    InvalidMintFrom,
-    #[msg("Invalid mint to")]
-    InvalidMintTo,
-    #[msg("Invalid mint")] // Non-matching
+    #[msg("Invalid mint")]
     InvalidMint,
     #[msg("Invalid network authority")] // Non-matching
     InvalidNetAuth,
-    #[msg("Inactive approval from")]
-    InactiveApprovalFrom,
-    #[msg("Inactive approval to")]
-    InactiveApprovalTo,
+    #[msg("Inactive approval")]
+    InactiveApproval,
     #[msg("Insufficient tokens")]
     InsufficientTokens,
     #[msg("Account frozen")]
