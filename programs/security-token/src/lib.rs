@@ -104,7 +104,15 @@ pub mod security_token {
     }
 
     // Token balance must be 0 to close an account. The account owner, close authority, or mint manager can close an account.
-    pub fn close_account(_ctx: Context<CloseAccount>) -> anchor_lang::Result<()> {
+    pub fn close_account(ctx: Context<CloseAccount>) -> anchor_lang::Result<()> {
+        let account = &ctx.accounts.account;
+        require_keys_eq!(account.mint, ctx.accounts.mint.key(), ErrorCode::InvalidMint);
+        let user_key = ctx.accounts.user.key();
+        let close_auth = account.close_auth;
+        let manager_key = ctx.accounts.mint.manager;
+        if !(user_key == close_auth || user_key == manager_key || user_key == account.owner) {
+            return Err(error!(ErrorCode::Overflow));
+        }
         Ok(())
     }
 
@@ -238,7 +246,14 @@ pub struct UpdateAccount<'info> {
 }
 
 #[derive(Accounts)]
-pub struct CloseAccount {}
+pub struct CloseAccount<'info> {
+    pub user: Signer<'info>,
+    #[account(mut)]
+    pub fee_receiver: Signer<'info>,
+    #[account(mut, close = fee_receiver)]
+    pub account: Account<'info, SecurityTokenAccount>,
+    pub mint: Account<'info, SecurityTokenMint>,
+}
 
 #[derive(Accounts)]
 pub struct Transfer<'info> {
@@ -279,6 +294,8 @@ pub enum ErrorCode {
     InsufficientTokens,
     #[msg("Account frozen")]
     AccountFrozen,
+    #[msg("Access denied")]
+    AccessDenied,
     #[msg("Overflow")]
     Overflow,
 }
