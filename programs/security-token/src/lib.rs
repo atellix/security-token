@@ -88,21 +88,6 @@ pub mod security_token {
         Ok(())
     }
 
-    // Only the mint manager can update accounts
-    pub fn update_account(ctx: Context<UpdateAccount>,
-        inp_locked_until: i64,
-        inp_frozen: bool,
-    ) -> anchor_lang::Result<()> {
-        let account = &mut ctx.accounts.account;
-        require_keys_eq!(account.mint, ctx.accounts.mint.key(), ErrorCode::InvalidMint);
-        require_keys_eq!(ctx.accounts.manager.key(), ctx.accounts.mint.manager, ErrorCode::InvalidMint);
-
-        account.locked_until = inp_locked_until;
-        account.frozen = inp_frozen;
-
-        Ok(())
-    }
-
     // Token balance must be 0 to close an account. The account owner, close authority, or mint manager can close an account.
     pub fn close_account(ctx: Context<CloseAccount>) -> anchor_lang::Result<()> {
         let account = &ctx.accounts.account;
@@ -111,7 +96,7 @@ pub mod security_token {
         let close_auth = account.close_auth;
         let manager_key = ctx.accounts.mint.manager;
         if !(user_key == close_auth || user_key == manager_key || user_key == account.owner) {
-            return Err(error!(ErrorCode::Overflow));
+            return Err(error!(ErrorCode::AccessDenied));
         }
         Ok(())
     }
@@ -149,19 +134,38 @@ pub mod security_token {
         Ok(())
     }
 
-    pub fn add_delegate(_ctx: Context<AddDelegate>) -> anchor_lang::Result<()> {
+    pub fn manager_create_account(ctx: Context<ManagerUpdateAccount>,
+    ) -> anchor_lang::Result<()> {
+    }
+
+    // Only the mint manager can update accounts
+    pub fn manager_update_account(ctx: Context<ManagerUpdateAccount>,
+        inp_locked_until: i64,
+        inp_frozen: bool,
+    ) -> anchor_lang::Result<()> {
+        let account = &mut ctx.accounts.account;
+        require_keys_eq!(account.mint, ctx.accounts.mint.key(), ErrorCode::InvalidMint);
+        require_keys_eq!(ctx.accounts.manager.key(), ctx.accounts.mint.manager, ErrorCode::InvalidMint);
+
+        account.locked_until = inp_locked_until;
+        account.frozen = inp_frozen;
+
         Ok(())
     }
 
-    pub fn update_delegate(_ctx: Context<UpdateDelegate>) -> anchor_lang::Result<()> {
+    pub fn delegate_approve(_ctx: Context<DelegateApprove>) -> anchor_lang::Result<()> {
         Ok(())
     }
 
-    pub fn remove_delegate(_ctx: Context<RemoveDelegate>) -> anchor_lang::Result<()> {
+    pub fn delegate_transfer(_ctx: Context<DelegateTransfer>) -> anchor_lang::Result<()> {
         Ok(())
     }
 
-    pub fn delegated_transfer(_ctx: Context<DelegatedTransfer>) -> anchor_lang::Result<()> {
+    pub fn delegate_update(_ctx: Context<DelegateUpdate>) -> anchor_lang::Result<()> {
+        Ok(())
+    }
+
+    pub fn delegate_close(_ctx: Context<DelegateClose>) -> anchor_lang::Result<()> {
         Ok(())
     }
 }
@@ -192,6 +196,17 @@ pub struct SecurityTokenAccount {
     pub locked_until: i64,
     pub frozen: bool,
 }
+
+#[account]
+#[derive(Default)]
+pub struct DelegateAllowance {
+    pub owner: Pubkey,                  // The owner of the allowance (must be same as the owner of the token account)
+    pub account: Pubkey,                // The security token account for the allowance
+    pub delegate: Pubkey,               // The delegate granted an allowance of tokens to transfer (typically the root PDA of another program)
+    pub amount: u64,                    // The amount of tokens for the allowance (same decimals as underlying token)
+    pub all: bool,                      // Ignore amount field, delegate all tokens (used to allow other programs to transfer tokens without needing to periodically reset the amount field)
+}
+// LEN: 8 + 32 + 32 + 32 + 8 + 1 = 113
 
 // Function Contexts:
 
@@ -238,14 +253,6 @@ pub struct CreateAccount<'info> {
 }
 
 #[derive(Accounts)]
-pub struct UpdateAccount<'info> {
-    #[account(mut)]
-    pub account: Account<'info, SecurityTokenAccount>,
-    pub mint: Account<'info, SecurityTokenMint>,
-    pub manager: Signer<'info>,
-}
-
-#[derive(Accounts)]
 pub struct CloseAccount<'info> {
     pub user: Signer<'info>,
     #[account(mut)]
@@ -267,16 +274,78 @@ pub struct Transfer<'info> {
 }
 
 #[derive(Accounts)]
-pub struct AddDelegate {}
+#[instruction(_inp_bump: u8, inp_uuid: u128)]
+pub struct ManagerCreateAccount<'info> {
+    #[account(zero, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump = _inp_bump)]
+    pub account: Account<'info, SecurityTokenAccount>,
+    pub mint: Account<'info, SecurityTokenMint>,
+    pub manager: Signer<'info>,
+    pub owner: UncheckedAccount<'info>,
+    pub create_auth: UncheckedAccount<'info>,
+    pub close_auth: UncheckedAccount<'info>,
+}
 
 #[derive(Accounts)]
-pub struct UpdateDelegate {}
+pub struct ManagerUpdateAccount<'info> {
+    #[account(mut)]
+    pub account: Account<'info, SecurityTokenAccount>,
+    pub mint: Account<'info, SecurityTokenMint>,
+    pub manager: Signer<'info>,
+}
 
 #[derive(Accounts)]
-pub struct RemoveDelegate {}
+pub struct ManagerTransfer<'info> {
+    #[account(mut)]
+    pub from: Account<'info, SecurityTokenAccount>,
+    #[account(mut)]
+    pub to: Account<'info, SecurityTokenAccount>,
+    pub mint: Account<'info, SecurityTokenMint>,
+    pub manager: Signer<'info>,
+}
 
 #[derive(Accounts)]
-pub struct DelegatedTransfer {}
+pub struct DelegateApprove<'info> {
+    #[account(init_if_needed, seeds = [account.key().as_ref(), delegate.key().as_ref()], bump, payer = allowance_payer, space = 113)]
+    pub allowance: Account<'info, DelegateAllowance>,
+    #[account(mut)]
+    pub allowance_payer: Signer<'info>,
+    pub owner: Signer<'info>,
+    pub delegate: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub account: Account<'info, SecurityTokenAccount>,
+    #[account(address = system_program::ID)]
+    pub system_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct DelegateTransfer<'info> {
+    #[account(mut)]
+    pub from: Account<'info, SecurityTokenAccount>,
+    pub from_auth: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub to: Account<'info, SecurityTokenAccount>,
+    pub to_auth: UncheckedAccount<'info>,
+    pub delegate: Signer<'info>,
+    #[account(mut)]
+    pub allowance: Account<'info, DelegateAllowance>,
+}
+
+#[derive(Accounts)]
+pub struct DelegateUpdate<'info> {
+    #[account(mut)]
+    pub allowance: Account<'info, DelegateAllowance>,
+    pub account: Account<'info, SecurityTokenAccount>,
+    pub owner: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct DelegateClose<'info> {
+    #[account(mut, close = fee_recipient)]
+    pub allowance: Account<'info, DelegateAllowance>,
+    pub owner: Signer<'info>,
+    #[account(mut)]
+    pub fee_recipient: UncheckedAccount<'info>,
+}
 
 #[error_code]
 pub enum ErrorCode {
