@@ -4,7 +4,7 @@ use anchor_lang::prelude::*;
 
 use net_authority::TokenGroupApproval;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("8JxtmFxuhmgoEFmBeZAqBVouj6DDQBwybpJnpqcYUU8M");
 
 #[inline]
 fn load_struct<T: AccountDeserialize>(acc: &AccountInfo) -> FnResult<T, ProgramError> {
@@ -63,7 +63,6 @@ pub mod security_token {
     // Approval from the network authority for the mint group is required to create account.
     // Account owners, or the mint manager, can create new accounts.
     pub fn create_account(ctx: Context<CreateAccount>,
-        _inp_bump: u8,
         inp_uuid: u128,
     ) -> anchor_lang::Result<()> {
 
@@ -71,7 +70,7 @@ pub mod security_token {
         let create_auth = &ctx.accounts.create_auth.to_account_info();
         require_keys_eq!(*create_auth.owner, ctx.accounts.mint.net_auth, ErrorCode::InvalidAuthOwner);
         let create_approval = load_struct::<TokenGroupApproval>(create_auth)?;
-        require!(!create_approval.active, ErrorCode::InactiveApproval);
+        require!(create_approval.active, ErrorCode::InactiveApproval);
         require_keys_eq!(create_approval.group, ctx.accounts.mint.group, ErrorCode::InvalidGroup);
 
         let account = &mut ctx.accounts.account;
@@ -116,14 +115,14 @@ pub mod security_token {
         let from_auth = &ctx.accounts.from_auth.to_account_info();
         require_keys_eq!(*from_auth.owner, from_account.net_auth, ErrorCode::InvalidAuthOwner);
         let from_approval = load_struct::<TokenGroupApproval>(from_auth)?;
-        require!(!from_approval.active, ErrorCode::InactiveApproval);
+        require!(from_approval.active, ErrorCode::InactiveApproval);
         require_keys_eq!(from_approval.group, from_account.group, ErrorCode::InvalidGroup);
 
         // Validate network authority data: to
         let to_auth = &ctx.accounts.to_auth.to_account_info();
         require_keys_eq!(*to_auth.owner, to_account.net_auth, ErrorCode::InvalidAuthOwner);
         let to_approval = load_struct::<TokenGroupApproval>(to_auth)?;
-        require!(!to_approval.active, ErrorCode::InactiveApproval);
+        require!(to_approval.active, ErrorCode::InactiveApproval);
         require_keys_eq!(to_approval.group, to_account.group, ErrorCode::InvalidGroup);
 
         if from_account.amount < inp_amount {
@@ -134,8 +133,9 @@ pub mod security_token {
         Ok(())
     }
 
-    pub fn manager_create_account(ctx: Context<ManagerUpdateAccount>,
+    pub fn manager_create_account(_ctx: Context<ManagerUpdateAccount>,
     ) -> anchor_lang::Result<()> {
+        Ok(())
     }
 
     // Only the mint manager can update accounts
@@ -196,6 +196,7 @@ pub struct SecurityTokenAccount {
     pub locked_until: i64,
     pub frozen: bool,
 }
+// Size: 8 + 16 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 1 = 201
 
 #[account]
 #[derive(Default)]
@@ -241,15 +242,16 @@ pub struct Burn<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(_inp_bump: u8, inp_uuid: u128)]
+#[instruction(inp_uuid: u128)]
 pub struct CreateAccount<'info> {
-    #[account(zero, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump = _inp_bump)]
+    #[account(init_if_needed, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump, payer = owner, space = 201)]
     pub account: Account<'info, SecurityTokenAccount>,
     pub mint: Account<'info, SecurityTokenMint>,
     #[account(mut)]
     pub owner: Signer<'info>,
     pub create_auth: UncheckedAccount<'info>,
     pub close_auth: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -313,8 +315,7 @@ pub struct DelegateApprove<'info> {
     pub delegate: UncheckedAccount<'info>,
     #[account(mut)]
     pub account: Account<'info, SecurityTokenAccount>,
-    #[account(address = system_program::ID)]
-    pub system_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
