@@ -36,12 +36,14 @@ pub mod security_token {
         inp_amount: u64,
     ) -> anchor_lang::Result<()> {
         let mint = &mut ctx.accounts.mint;
+
+        // Check auth
         require_keys_eq!(mint.manager, ctx.accounts.manager.key());
-        mint.supply = mint.supply.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
         let account = &mut ctx.accounts.to;
         require!(!account.frozen, ErrorCode::AccountFrozen);
+        mint.supply = mint.supply.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
         account.amount = account.amount.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
-        // TODO: Check auth
+
         // TODO: Logging
         Ok(())
     }
@@ -72,6 +74,7 @@ pub mod security_token {
         let create_approval = load_struct::<TokenGroupApproval>(create_auth)?;
         require!(create_approval.active, ErrorCode::InactiveApproval);
         require_keys_eq!(create_approval.group, ctx.accounts.mint.group, ErrorCode::InvalidGroup);
+        require_keys_eq!(create_approval.owner, ctx.accounts.owner.key(), ErrorCode::AccessDenied);
 
         let account = &mut ctx.accounts.account;
         account.uuid = inp_uuid;
@@ -83,13 +86,13 @@ pub mod security_token {
         account.amount = 0;
         account.locked_until = 0;
         account.frozen = false;
-        // TODO: Verify authority to create token account
         Ok(())
     }
 
     // Token balance must be 0 to close an account. The account owner, close authority, or mint manager can close an account.
     pub fn close_account(ctx: Context<CloseAccount>) -> anchor_lang::Result<()> {
         let account = &ctx.accounts.account;
+        require!(account.amount == 0, ErrorCode::NonZeroAccountBalance);
         require_keys_eq!(account.mint, ctx.accounts.mint.key(), ErrorCode::InvalidMint);
         let user_key = ctx.accounts.user.key();
         let close_auth = account.close_auth;
@@ -104,8 +107,8 @@ pub mod security_token {
         inp_amount: u64,
     ) -> anchor_lang::Result<()> {
         let to_account = &mut ctx.accounts.to;
-        require!(!to_account.frozen, ErrorCode::AccountFrozen);
         let from_account = &mut ctx.accounts.from;
+        require!(!to_account.frozen, ErrorCode::AccountFrozen);
         require!(!from_account.frozen, ErrorCode::AccountFrozen);
         require_keys_eq!(from_account.mint, to_account.mint, ErrorCode::InvalidMint);
         require_keys_eq!(from_account.group, to_account.group, ErrorCode::InvalidGroup);
@@ -117,6 +120,7 @@ pub mod security_token {
         let from_approval = load_struct::<TokenGroupApproval>(from_auth)?;
         require!(from_approval.active, ErrorCode::InactiveApproval);
         require_keys_eq!(from_approval.group, from_account.group, ErrorCode::InvalidGroup);
+        require_keys_eq!(from_approval.owner, from_account.owner, ErrorCode::AccessDenied);
 
         // Validate network authority data: to
         let to_auth = &ctx.accounts.to_auth.to_account_info();
@@ -124,6 +128,9 @@ pub mod security_token {
         let to_approval = load_struct::<TokenGroupApproval>(to_auth)?;
         require!(to_approval.active, ErrorCode::InactiveApproval);
         require_keys_eq!(to_approval.group, to_account.group, ErrorCode::InvalidGroup);
+        require_keys_eq!(to_approval.owner, to_account.owner, ErrorCode::AccessDenied);
+
+        // TODO: Check timelock
 
         if from_account.amount < inp_amount {
             return Err(error!(ErrorCode::InsufficientTokens));
@@ -133,8 +140,30 @@ pub mod security_token {
         Ok(())
     }
 
-    pub fn manager_create_account(_ctx: Context<ManagerUpdateAccount>,
+    pub fn manager_create_account(ctx: Context<ManagerCreateAccount>,
+        inp_uuid: u128,
     ) -> anchor_lang::Result<()> {
+        let account = &mut ctx.accounts.account;
+        require_keys_eq!(account.mint, ctx.accounts.mint.key(), ErrorCode::InvalidMint);
+        require_keys_eq!(ctx.accounts.manager.key(), ctx.accounts.mint.manager, ErrorCode::AccessDenied);
+
+        // Verify authority to create token account
+        let create_auth = &ctx.accounts.create_auth.to_account_info();
+        require_keys_eq!(*create_auth.owner, ctx.accounts.mint.net_auth, ErrorCode::InvalidAuthOwner);
+        let create_approval = load_struct::<TokenGroupApproval>(create_auth)?;
+        require!(create_approval.active, ErrorCode::InactiveApproval);
+        require_keys_eq!(create_approval.group, ctx.accounts.mint.group, ErrorCode::InvalidGroup);
+        require_keys_eq!(create_approval.owner, ctx.accounts.owner.key(), ErrorCode::AccessDenied);
+
+        account.uuid = inp_uuid;
+        account.owner = *ctx.accounts.owner.to_account_info().key;
+        account.mint = *ctx.accounts.mint.to_account_info().key;
+        account.group = ctx.accounts.mint.group;
+        account.net_auth = ctx.accounts.mint.net_auth;
+        account.close_auth = *ctx.accounts.close_auth.to_account_info().key;
+        account.amount = 0;
+        account.locked_until = 0;
+        account.frozen = false;
         Ok(())
     }
 
@@ -149,23 +178,102 @@ pub mod security_token {
 
         account.locked_until = inp_locked_until;
         account.frozen = inp_frozen;
+        Ok(())
+    }
+
+    pub fn delegate_approve(ctx: Context<DelegateApprove>,
+        inp_allowance_amount: u64,
+        inp_all: bool,
+    ) -> anchor_lang::Result<()> {
+
+        let account = &mut ctx.accounts.account;
+        require_keys_eq!(account.owner, ctx.accounts.owner.key(), ErrorCode::AccessDenied);
+        
+        let allowance = &mut ctx.accounts.allowance;
+        allowance.owner = *ctx.accounts.owner.to_account_info().key;
+        allowance.account = *ctx.accounts.account.to_account_info().key;
+        allowance.delegate = *ctx.accounts.delegate.to_account_info().key;
+        if inp_all {
+            allowance.amount = 0;
+            allowance.all = true;
+        } else {
+            allowance.amount = inp_allowance_amount;
+            allowance.all = false;
+        }
+        Ok(())
+    }
+
+    pub fn delegate_transfer(ctx: Context<DelegateTransfer>,
+        inp_amount: u64,
+    ) -> anchor_lang::Result<()> {
+        let allowance = &mut ctx.accounts.allowance;
+        let to_account = &mut ctx.accounts.to;
+        let from_account = &mut ctx.accounts.from;
+
+        // Validate allowance
+        require_keys_eq!(from_account.key(), allowance.account, ErrorCode::AccessDenied);
+        require_keys_eq!(ctx.accounts.delegate.key(), allowance.delegate, ErrorCode::AccessDenied);
+        if !allowance.all {
+            require!(allowance.amount >= inp_amount, ErrorCode::InsufficientAllowance);
+        }
+
+        require!(!to_account.frozen, ErrorCode::AccountFrozen);
+        require!(!from_account.frozen, ErrorCode::AccountFrozen);
+        require_keys_eq!(from_account.mint, to_account.mint, ErrorCode::InvalidMint);
+        require_keys_eq!(from_account.group, to_account.group, ErrorCode::InvalidGroup);
+        require_keys_eq!(from_account.net_auth, to_account.net_auth, ErrorCode::InvalidNetAuth);
+
+        // Validate network authority data: from
+        let from_auth = &ctx.accounts.from_auth.to_account_info();
+        require_keys_eq!(*from_auth.owner, from_account.net_auth, ErrorCode::InvalidAuthOwner);
+        let from_approval = load_struct::<TokenGroupApproval>(from_auth)?;
+        require!(from_approval.active, ErrorCode::InactiveApproval);
+        require_keys_eq!(from_approval.group, from_account.group, ErrorCode::InvalidGroup);
+        require_keys_eq!(from_approval.owner, from_account.owner, ErrorCode::AccessDenied);
+
+        // Validate network authority data: to
+        let to_auth = &ctx.accounts.to_auth.to_account_info();
+        require_keys_eq!(*to_auth.owner, to_account.net_auth, ErrorCode::InvalidAuthOwner);
+        let to_approval = load_struct::<TokenGroupApproval>(to_auth)?;
+        require!(to_approval.active, ErrorCode::InactiveApproval);
+        require_keys_eq!(to_approval.group, to_account.group, ErrorCode::InvalidGroup);
+        require_keys_eq!(to_approval.owner, to_account.owner, ErrorCode::AccessDenied);
+
+        // TODO: Check timelock
+
+        if from_account.amount < inp_amount {
+            return Err(error!(ErrorCode::InsufficientTokens));
+        }
+        from_account.amount = from_account.amount.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
+        to_account.amount = to_account.amount.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
+        if !allowance.all {
+            allowance.amount = allowance.amount.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
+        }
+        Ok(())
+    }
+
+    pub fn delegate_update(ctx: Context<DelegateUpdate>,
+        inp_allowance_amount: u64,
+        inp_all: bool,
+    ) -> anchor_lang::Result<()> {
+        let allowance = &mut ctx.accounts.allowance;
+
+        require_keys_eq!(ctx.accounts.owner.key(), allowance.owner, ErrorCode::AccessDenied);
+
+        if inp_all {
+            allowance.amount = 0;
+            allowance.all = true;
+        } else {
+            allowance.amount = inp_allowance_amount;
+            allowance.all = false;
+        }
 
         Ok(())
     }
 
-    pub fn delegate_approve(_ctx: Context<DelegateApprove>) -> anchor_lang::Result<()> {
-        Ok(())
-    }
-
-    pub fn delegate_transfer(_ctx: Context<DelegateTransfer>) -> anchor_lang::Result<()> {
-        Ok(())
-    }
-
-    pub fn delegate_update(_ctx: Context<DelegateUpdate>) -> anchor_lang::Result<()> {
-        Ok(())
-    }
-
-    pub fn delegate_close(_ctx: Context<DelegateClose>) -> anchor_lang::Result<()> {
+    pub fn delegate_close(ctx: Context<DelegateClose>) -> anchor_lang::Result<()> {
+        let allowance = &ctx.accounts.allowance;
+        require_keys_eq!(allowance.owner, ctx.accounts.owner.key(), ErrorCode::AccessDenied);
         Ok(())
     }
 }
@@ -276,15 +384,17 @@ pub struct Transfer<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(_inp_bump: u8, inp_uuid: u128)]
+#[instruction(inp_uuid: u128)]
 pub struct ManagerCreateAccount<'info> {
-    #[account(zero, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump = _inp_bump)]
+    #[account(init_if_needed, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump, payer = manager, space = 201)]
     pub account: Account<'info, SecurityTokenAccount>,
     pub mint: Account<'info, SecurityTokenMint>,
+    #[account(mut)]
     pub manager: Signer<'info>,
     pub owner: UncheckedAccount<'info>,
     pub create_auth: UncheckedAccount<'info>,
     pub close_auth: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -307,10 +417,9 @@ pub struct ManagerTransfer<'info> {
 
 #[derive(Accounts)]
 pub struct DelegateApprove<'info> {
-    #[account(init_if_needed, seeds = [account.key().as_ref(), delegate.key().as_ref()], bump, payer = allowance_payer, space = 113)]
+    #[account(init_if_needed, seeds = [account.key().as_ref(), delegate.key().as_ref()], bump, payer = owner, space = 113)]
     pub allowance: Account<'info, DelegateAllowance>,
     #[account(mut)]
-    pub allowance_payer: Signer<'info>,
     pub owner: Signer<'info>,
     pub delegate: UncheckedAccount<'info>,
     #[account(mut)]
@@ -348,6 +457,52 @@ pub struct DelegateClose<'info> {
     pub fee_recipient: UncheckedAccount<'info>,
 }
 
+#[event]
+pub struct CreateMintEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub mint: Pubkey,
+    pub manager: Pubkey,
+    pub group: Pubkey,
+}
+
+#[event]
+pub struct MintEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub mint: Pubkey,
+    pub manager: Pubkey,
+    pub account: Pubkey,
+    pub amount: u64,
+    pub new_supply: u64,
+    pub new_balance: u64,
+}
+
+#[event]
+pub struct BurnEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub mint: Pubkey,
+    pub manager: Pubkey,
+    pub account: Pubkey,
+    pub amount: u64,
+    pub new_supply: u64,
+    pub new_balance: u64,
+}
+
+#[event]
+pub struct TransferEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub from_account: Pubkey,
+    pub to_account: Pubkey,
+    pub user: Pubkey,
+    pub amount: u64,
+    pub new_from_balance: u64,
+    pub new_to_balance: u64,
+    pub delegated: bool,
+}
+
 #[error_code]
 pub enum ErrorCode {
     #[msg("Invalid approval owner")]
@@ -362,6 +517,10 @@ pub enum ErrorCode {
     InactiveApproval,
     #[msg("Insufficient tokens")]
     InsufficientTokens,
+    #[msg("Insufficient allowance")]
+    InsufficientAllowance,
+    #[msg("Non-zero account balance")]
+    NonZeroAccountBalance,
     #[msg("Account frozen")]
     AccountFrozen,
     #[msg("Access denied")]

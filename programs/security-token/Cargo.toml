@@ -13,7 +13,7 @@ no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 cpi = ["no-entrypoint"]
-default = []
+default = ["no-log-ix-name"]
 
 [dependencies]
 anchor-lang = "0.24.2"
