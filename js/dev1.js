@@ -25,7 +25,7 @@ async function main() {
     var accountBuf1 = Buffer.from(uuidparse(accountId1).reverse())
     var accountId2 = uuidv4()
     var accountBuf2 = Buffer.from(uuidparse(accountId2).reverse())
-    const accountBytes = 201
+    const accountBytes = 209
     const accountRent = await provider.connection.getMinimumBalanceForRentExemption(accountBytes)
     const accountInfo1 = await programAddress([mint.publicKey.toBuffer(), owner.toBuffer(), accountBuf1], securityTokenPK)
     const account1 = new PublicKey(accountInfo1.pubkey)

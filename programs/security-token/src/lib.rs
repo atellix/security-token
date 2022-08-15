@@ -27,10 +27,20 @@ pub mod security_token {
         mint.decimals = inp_decimals;
         mint.url = inp_url;
         msg!("Create Mint: {}", mint.url.as_str());
+
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(CreateMintEvent {
+            event_hash: 242845757374072834824834923033958114258, // solana/program/security-token/create_mint
+            slot: clock.slot,
+            mint: mint.key(),
+            manager: *ctx.accounts.manager.to_account_info().key,
+            net_auth: *ctx.accounts.net_auth.to_account_info().key,
+            group: *ctx.accounts.group.to_account_info().key,
+        });
+
         Ok(())
     }
-
-    // TODO: Update mint
 
     pub fn mint(ctx: Context<Mint>,
         inp_amount: u64,
@@ -44,7 +54,25 @@ pub mod security_token {
         mint.supply = mint.supply.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
         account.amount = account.amount.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
 
-        // TODO: Logging
+        // Increment action count
+        account.action_count = account.action_count.checked_add(1).ok_or(error!(ErrorCode::Overflow))?;
+
+        // Logging
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(MintEvent {
+            event_hash: 280177221030518891079652254311266574141, // solana/program/security-token/mint
+            slot: clock.slot,
+            mint: mint.key(),
+            manager: *ctx.accounts.manager.to_account_info().key,
+            account: account.key(),
+            owner: account.owner,
+            amount: inp_amount,
+            new_supply: mint.supply,
+            new_balance: account.amount,
+            action_id: account.action_count,
+        });
+
         Ok(())
     }
 
@@ -53,12 +81,33 @@ pub mod security_token {
     ) -> anchor_lang::Result<()> {
         let mint = &mut ctx.accounts.mint;
         require_keys_eq!(mint.manager, ctx.accounts.manager.key());
+
+        // Checking network authority not necessary to burn
         mint.supply = mint.supply.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
         let account = &mut ctx.accounts.from;
+
         // Burning from frozen accounts allowed
         account.amount = account.amount.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
-        // Checking network authority not necessary to burn
-        // TODO: Logging
+
+        // Increment action count
+        account.action_count = account.action_count.checked_add(1).ok_or(error!(ErrorCode::Overflow))?;
+
+        // Logging
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(BurnEvent {
+            event_hash: 82379720673132384763647910321069443842, // solana/program/security-token/burn
+            slot: clock.slot,
+            mint: mint.key(),
+            manager: *ctx.accounts.manager.to_account_info().key,
+            account: account.key(),
+            owner: account.owner,
+            amount: inp_amount,
+            new_supply: mint.supply,
+            new_balance: account.amount,
+            action_id: account.action_count,
+        });
+
         Ok(())
     }
 
@@ -85,7 +134,25 @@ pub mod security_token {
         account.close_auth = *ctx.accounts.close_auth.to_account_info().key;
         account.amount = 0;
         account.locked_until = 0;
+        account.action_count = 0;
         account.frozen = false;
+
+        // Logging
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(AccountEvent {
+            event_hash: 283176560959297984528699322955846433642, // solana/program/security-token/create_account
+            slot: clock.slot,
+            mint: account.mint,
+            owner: account.owner,
+            account: account.key(),
+            manager: Pubkey::default(),
+            locked_until: 0,
+            frozen: false,
+            is_manager: false,
+            is_update: false,
+        });
+
         Ok(())
     }
 
@@ -100,6 +167,19 @@ pub mod security_token {
         if !(user_key == close_auth || user_key == manager_key || user_key == account.owner) {
             return Err(error!(ErrorCode::AccessDenied));
         }
+
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(CloseEvent {
+            event_hash: 291921020161207202589209186455769654935, // solana/program/security-token/close_account
+            slot: clock.slot,
+            user: user_key,
+            owner: account.owner,
+            account: account.key(),
+            allowance: Pubkey::default(),
+            is_allowance: false,
+        });
+
         Ok(())
     }
 
@@ -108,8 +188,10 @@ pub mod security_token {
     ) -> anchor_lang::Result<()> {
         let to_account = &mut ctx.accounts.to;
         let from_account = &mut ctx.accounts.from;
+
         require!(!to_account.frozen, ErrorCode::AccountFrozen);
         require!(!from_account.frozen, ErrorCode::AccountFrozen);
+        require_keys_eq!(from_account.owner, ctx.accounts.user.key(), ErrorCode::AccessDenied);
         require_keys_eq!(from_account.mint, to_account.mint, ErrorCode::InvalidMint);
         require_keys_eq!(from_account.group, to_account.group, ErrorCode::InvalidGroup);
         require_keys_eq!(from_account.net_auth, to_account.net_auth, ErrorCode::InvalidNetAuth);
@@ -137,6 +219,31 @@ pub mod security_token {
         }
         from_account.amount = from_account.amount.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
         to_account.amount = to_account.amount.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
+
+        // Increment action count
+        from_account.action_count = from_account.action_count.checked_add(1).ok_or(error!(ErrorCode::Overflow))?;
+        to_account.action_count = to_account.action_count.checked_add(1).ok_or(error!(ErrorCode::Overflow))?;
+
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(TransferEvent {
+            event_hash: 148603774903118292415252491548477030903, // solana/program/security-token/transfer
+            slot: clock.slot,
+            from_account: from_account.key(),
+            to_account: to_account.key(),
+            from_owner: from_account.owner,
+            to_owner: to_account.owner,
+            user: ctx.accounts.user.key(),
+            mint: from_account.mint,
+            group: from_account.group,
+            amount: inp_amount,
+            new_from_balance: from_account.amount,
+            new_to_balance: to_account.amount,
+            from_action_id: from_account.action_count,
+            to_action_id: to_account.action_count,
+            is_delegate: false,
+        });
+
         Ok(())
     }
 
@@ -301,10 +408,11 @@ pub struct SecurityTokenAccount {
     pub net_auth: Pubkey,
     pub close_auth: Pubkey,
     pub amount: u64,
+    pub action_count: u64,
     pub locked_until: i64,
     pub frozen: bool,
 }
-// Size: 8 + 16 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 1 = 201
+// Size: 8 + 16 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 1 = 209
 
 #[account]
 #[derive(Default)]
@@ -352,7 +460,7 @@ pub struct Burn<'info> {
 #[derive(Accounts)]
 #[instruction(inp_uuid: u128)]
 pub struct CreateAccount<'info> {
-    #[account(init_if_needed, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump, payer = owner, space = 201)]
+    #[account(init_if_needed, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump, payer = owner, space = 209)]
     pub account: Account<'info, SecurityTokenAccount>,
     pub mint: Account<'info, SecurityTokenMint>,
     #[account(mut)]
@@ -386,7 +494,7 @@ pub struct Transfer<'info> {
 #[derive(Accounts)]
 #[instruction(inp_uuid: u128)]
 pub struct ManagerCreateAccount<'info> {
-    #[account(init_if_needed, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump, payer = manager, space = 201)]
+    #[account(init_if_needed, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump, payer = manager, space = 209)]
     pub account: Account<'info, SecurityTokenAccount>,
     pub mint: Account<'info, SecurityTokenMint>,
     #[account(mut)]
@@ -405,6 +513,7 @@ pub struct ManagerUpdateAccount<'info> {
     pub manager: Signer<'info>,
 }
 
+// TODO: Implement fn!
 #[derive(Accounts)]
 pub struct ManagerTransfer<'info> {
     #[account(mut)]
@@ -463,7 +572,22 @@ pub struct CreateMintEvent {
     pub slot: u64,
     pub mint: Pubkey,
     pub manager: Pubkey,
+    pub net_auth: Pubkey,
     pub group: Pubkey,
+}
+
+#[event]
+pub struct AccountEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub mint: Pubkey,
+    pub owner: Pubkey,
+    pub account: Pubkey,
+    pub manager: Pubkey,
+    pub locked_until: i64,
+    pub frozen: bool,
+    pub is_manager: bool,
+    pub is_update: bool,
 }
 
 #[event]
@@ -473,9 +597,11 @@ pub struct MintEvent {
     pub mint: Pubkey,
     pub manager: Pubkey,
     pub account: Pubkey,
+    pub owner: Pubkey,
     pub amount: u64,
     pub new_supply: u64,
     pub new_balance: u64,
+    pub action_id: u64,
 }
 
 #[event]
@@ -485,9 +611,11 @@ pub struct BurnEvent {
     pub mint: Pubkey,
     pub manager: Pubkey,
     pub account: Pubkey,
+    pub owner: Pubkey,
     pub amount: u64,
     pub new_supply: u64,
     pub new_balance: u64,
+    pub action_id: u64,
 }
 
 #[event]
@@ -496,11 +624,40 @@ pub struct TransferEvent {
     pub slot: u64,
     pub from_account: Pubkey,
     pub to_account: Pubkey,
+    pub from_owner: Pubkey,
+    pub to_owner: Pubkey,
     pub user: Pubkey,
+    pub mint: Pubkey,
+    pub group: Pubkey,
     pub amount: u64,
     pub new_from_balance: u64,
     pub new_to_balance: u64,
-    pub delegated: bool,
+    pub from_action_id: u64,
+    pub to_action_id: u64,
+    pub is_delegate: bool,
+}
+
+#[event]
+pub struct CloseEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub user: Pubkey,
+    pub owner: Pubkey,
+    pub account: Pubkey,
+    pub allowance: Pubkey,
+    pub is_allowance: bool,
+}
+
+#[event]
+pub struct DelegateEvent {
+    pub event_hash: u128,
+    pub slot: u64,
+    pub owner: Pubkey,
+    pub account: Pubkey,
+    pub allowance: Pubkey,
+    pub amount: u64,
+    pub all: bool,
+    pub is_close: bool,
 }
 
 #[error_code]
