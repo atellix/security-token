@@ -14,6 +14,18 @@ anchor.setProvider(provider)
 const securityToken = anchor.workspace.SecurityToken
 const securityTokenPK = securityToken.programId
 
+function showData(spec) {
+    var r = {}
+    for (var i in spec) {
+        if (typeof spec[i] === 'object' && spec[i].constructor.name === 'Object') {
+            r[i] = showData(spec[i])
+        } else if (typeof spec[i].toString !== 'undefined') {
+            r[i] = spec[i].toString()
+        }
+    }
+    return r
+}
+
 async function main() {
     console.log('Security Token Program: ' + securityTokenPK.toString())
     const mint = anchor.web3.Keypair.generate()
@@ -94,7 +106,7 @@ async function main() {
             }
         ),
         securityToken.instruction.transfer(
-            new anchor.BN(500),
+            new anchor.BN(250),
             {
                 accounts: {
                     user: provider.wallet.publicKey,
@@ -104,9 +116,25 @@ async function main() {
                     toAuth: new PublicKey(approval.pubkey),
                 },
             }
+        ),
+        securityToken.instruction.transfer(
+            new anchor.BN(150),
+            {
+                accounts: {
+                    user: provider.wallet.publicKey,
+                    from: account2,
+                    fromAuth: new PublicKey(approval.pubkey),
+                    to: account1,
+                    toAuth: new PublicKey(approval.pubkey),
+                },
+            }
         )
     )
     console.log(await provider.sendAndConfirm(tx, [mint]))
+    let tokenAccount1 = await securityToken.account.securityTokenAccount.fetch(account1)
+    console.log(showData(tokenAccount1))
+    let tokenAccount2 = await securityToken.account.securityTokenAccount.fetch(account2)
+    console.log(showData(tokenAccount2))
 }
 
 console.log('Begin')

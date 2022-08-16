@@ -282,6 +282,23 @@ pub mod security_token {
         account.amount = 0;
         account.locked_until = 0;
         account.frozen = false;
+
+        // Logging
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(AccountEvent {
+            event_hash: 938423672660366329426962638892256063, // solana/program/security-token/manager_create_account
+            slot: clock.slot,
+            mint: account.mint,
+            owner: account.owner,
+            account: account.key(),
+            manager: ctx.accounts.manager.key(),
+            locked_until: 0,
+            frozen: false,
+            is_manager: true,
+            is_update: false,
+        });
+
         Ok(())
     }
 
@@ -296,6 +313,23 @@ pub mod security_token {
 
         account.locked_until = inp_locked_until;
         account.frozen = inp_frozen;
+
+        // Logging
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(AccountEvent {
+            event_hash: 938423672660366329426962638892256063, // solana/program/security-token/manager_create_account
+            slot: clock.slot,
+            mint: account.mint,
+            owner: account.owner,
+            account: account.key(),
+            manager: ctx.accounts.manager.key(),
+            locked_until: inp_locked_until,
+            frozen: inp_frozen,
+            is_manager: true,
+            is_update: true,
+        });
+
         Ok(())
     }
 
@@ -318,6 +352,19 @@ pub mod security_token {
             allowance.amount = inp_allowance_amount;
             allowance.all = false;
         }
+
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(DelegateEvent {
+            event_hash: 314766331075817457906070455995600032549, // solana/program/security-token/delegate_approve
+            slot: clock.slot,
+            owner: allowance.owner,
+            account: allowance.account,
+            allowance: allowance.key(),
+            amount: allowance.amount,
+            all: allowance.all,
+        });
+
         Ok(())
     }
 
@@ -363,6 +410,27 @@ pub mod security_token {
         if !allowance.all {
             allowance.amount = allowance.amount.checked_sub(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
         }
+
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(TransferEvent {
+            event_hash: 77120837621749703851339913842088399176, // solana/program/security-token/delegate_transfer
+            slot: clock.slot,
+            from_account: from_account.key(),
+            to_account: to_account.key(),
+            from_owner: from_account.owner,
+            to_owner: to_account.owner,
+            user: ctx.accounts.delegate.key(),
+            mint: from_account.mint,
+            group: from_account.group,
+            amount: inp_amount,
+            new_from_balance: from_account.amount,
+            new_to_balance: to_account.amount,
+            from_action_id: from_account.action_count,
+            to_action_id: to_account.action_count,
+            is_delegate: true,
+        });
+
         Ok(())
     }
 
@@ -382,12 +450,38 @@ pub mod security_token {
             allowance.all = false;
         }
 
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(DelegateEvent {
+            event_hash: 210977558287682352241375836456168014066, // solana/program/security-token/delegate_update
+            slot: clock.slot,
+            owner: allowance.owner,
+            account: allowance.account,
+            allowance: allowance.key(),
+            amount: allowance.amount,
+            all: allowance.all,
+        });
+
         Ok(())
     }
 
     pub fn delegate_close(ctx: Context<DelegateClose>) -> anchor_lang::Result<()> {
         let allowance = &ctx.accounts.allowance;
-        require_keys_eq!(allowance.owner, ctx.accounts.owner.key(), ErrorCode::AccessDenied);
+        let owner_key = &ctx.accounts.owner.key();
+        require_keys_eq!(allowance.owner, *owner_key, ErrorCode::AccessDenied);
+
+        let clock = Clock::get()?;
+        msg!("atellix-log");
+        emit!(CloseEvent {
+            event_hash: 147878554016463740568088462290232555594, // solana/program/security-token/delegate_close
+            slot: clock.slot,
+            user: *owner_key,
+            owner: *owner_key,
+            account: allowance.account,
+            allowance: allowance.key(),
+            is_allowance: true,
+        });
+
         Ok(())
     }
 }
@@ -664,7 +758,6 @@ pub struct DelegateEvent {
     pub allowance: Pubkey,
     pub amount: u64,
     pub all: bool,
-    pub is_close: bool,
 }
 
 #[error_code]
