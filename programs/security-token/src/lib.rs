@@ -1,8 +1,8 @@
-use std::{ result::Result as FnResult };
+use std::{ result::Result as FnResult, convert::TryFrom };
 use solana_program::{ account_info::AccountInfo };
 use anchor_lang::prelude::*;
 
-use net_authority::TokenGroupApproval;
+use net_authority::{ TokenApproval, TokenApprovalStatus };
 
 declare_id!("8JxtmFxuhmgoEFmBeZAqBVouj6DDQBwybpJnpqcYUU8M");
 
@@ -10,6 +10,20 @@ declare_id!("8JxtmFxuhmgoEFmBeZAqBVouj6DDQBwybpJnpqcYUU8M");
 fn load_struct<T: AccountDeserialize>(acc: &AccountInfo) -> FnResult<T, ProgramError> {
     let mut data: &[u8] = &acc.try_borrow_data()?;
     Ok(T::try_deserialize(&mut data)?)
+}
+
+#[inline]
+fn verify_approval(approval: &TokenApproval, owner: &Pubkey, mint: &Pubkey, group: &Pubkey) -> anchor_lang::Result<()> {
+    require_keys_eq!(approval.owner, *owner, ErrorCode::AccessDenied);
+    let status = TokenApprovalStatus::try_from(approval.status).unwrap();
+    if status == TokenApprovalStatus::PerGroup {
+        require_keys_eq!(approval.context, *group, ErrorCode::InvalidGroup);
+    } else if status == TokenApprovalStatus::PerMint {
+        require_keys_eq!(approval.context, *mint, ErrorCode::InvalidMint);
+    } else {
+        return Err(error!(ErrorCode::AccessDenied));
+    }
+    Ok(())
 }
 
 #[program]
@@ -46,10 +60,15 @@ pub mod security_token {
         inp_amount: u64,
     ) -> anchor_lang::Result<()> {
         let mint = &mut ctx.accounts.mint;
+        let account = &mut ctx.accounts.to;
 
         // Check auth
         require_keys_eq!(mint.manager, ctx.accounts.manager.key());
-        let account = &mut ctx.accounts.to;
+        let auth = &ctx.accounts.to_auth.to_account_info();
+        require_keys_eq!(*auth.owner, mint.net_auth, ErrorCode::InvalidAuthOwner);
+        let approval = load_struct::<TokenApproval>(auth)?;
+        verify_approval(&approval, &account.owner, &mint.key(), &mint.group)?;
+
         require!(!account.frozen, ErrorCode::AccountFrozen);
         mint.supply = mint.supply.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
         account.amount = account.amount.checked_add(inp_amount).ok_or(error!(ErrorCode::Overflow))?;
@@ -118,12 +137,10 @@ pub mod security_token {
     ) -> anchor_lang::Result<()> {
 
         // Verify authority to create token account
-        let create_auth = &ctx.accounts.create_auth.to_account_info();
-        require_keys_eq!(*create_auth.owner, ctx.accounts.mint.net_auth, ErrorCode::InvalidAuthOwner);
-        let create_approval = load_struct::<TokenGroupApproval>(create_auth)?;
-        require!(create_approval.active, ErrorCode::InactiveApproval);
-        require_keys_eq!(create_approval.group, ctx.accounts.mint.group, ErrorCode::InvalidGroup);
-        require_keys_eq!(create_approval.owner, ctx.accounts.owner.key(), ErrorCode::AccessDenied);
+        let auth = &ctx.accounts.create_auth.to_account_info();
+        require_keys_eq!(*auth.owner, ctx.accounts.mint.net_auth, ErrorCode::InvalidAuthOwner);
+        let approval = load_struct::<TokenApproval>(auth)?;
+        verify_approval(&approval, &ctx.accounts.owner.key(), &ctx.accounts.mint.key(), &ctx.accounts.mint.group)?;
 
         let account = &mut ctx.accounts.account;
         account.uuid = inp_uuid;
@@ -199,18 +216,14 @@ pub mod security_token {
         // Validate network authority data: from
         let from_auth = &ctx.accounts.from_auth.to_account_info();
         require_keys_eq!(*from_auth.owner, from_account.net_auth, ErrorCode::InvalidAuthOwner);
-        let from_approval = load_struct::<TokenGroupApproval>(from_auth)?;
-        require!(from_approval.active, ErrorCode::InactiveApproval);
-        require_keys_eq!(from_approval.group, from_account.group, ErrorCode::InvalidGroup);
-        require_keys_eq!(from_approval.owner, from_account.owner, ErrorCode::AccessDenied);
+        let from_approval = load_struct::<TokenApproval>(from_auth)?;
+        verify_approval(&from_approval, &from_account.owner, &from_account.mint.key(), &from_account.group)?;
 
         // Validate network authority data: to
         let to_auth = &ctx.accounts.to_auth.to_account_info();
         require_keys_eq!(*to_auth.owner, to_account.net_auth, ErrorCode::InvalidAuthOwner);
-        let to_approval = load_struct::<TokenGroupApproval>(to_auth)?;
-        require!(to_approval.active, ErrorCode::InactiveApproval);
-        require_keys_eq!(to_approval.group, to_account.group, ErrorCode::InvalidGroup);
-        require_keys_eq!(to_approval.owner, to_account.owner, ErrorCode::AccessDenied);
+        let to_approval = load_struct::<TokenApproval>(to_auth)?;
+        verify_approval(&to_approval, &to_account.owner, &to_account.mint.key(), &to_account.group)?;
 
         // TODO: Check timelock
 
@@ -255,12 +268,10 @@ pub mod security_token {
         require_keys_eq!(ctx.accounts.manager.key(), ctx.accounts.mint.manager, ErrorCode::AccessDenied);
 
         // Verify authority to create token account
-        let create_auth = &ctx.accounts.create_auth.to_account_info();
-        require_keys_eq!(*create_auth.owner, ctx.accounts.mint.net_auth, ErrorCode::InvalidAuthOwner);
-        let create_approval = load_struct::<TokenGroupApproval>(create_auth)?;
-        require!(create_approval.active, ErrorCode::InactiveApproval);
-        require_keys_eq!(create_approval.group, ctx.accounts.mint.group, ErrorCode::InvalidGroup);
-        require_keys_eq!(create_approval.owner, ctx.accounts.owner.key(), ErrorCode::AccessDenied);
+        let auth = &ctx.accounts.create_auth.to_account_info();
+        require_keys_eq!(*auth.owner, ctx.accounts.mint.net_auth, ErrorCode::InvalidAuthOwner);
+        let approval = load_struct::<TokenApproval>(auth)?;
+        verify_approval(&approval, &ctx.accounts.owner.key(), &ctx.accounts.mint.key(), &ctx.accounts.mint.group)?;
 
         account.uuid = inp_uuid;
         account.owner = *ctx.accounts.owner.to_account_info().key;
@@ -333,18 +344,14 @@ pub mod security_token {
         // Validate network authority data: from
         let from_auth = &ctx.accounts.from_auth.to_account_info();
         require_keys_eq!(*from_auth.owner, from_account.net_auth, ErrorCode::InvalidAuthOwner);
-        let from_approval = load_struct::<TokenGroupApproval>(from_auth)?;
-        require!(from_approval.active, ErrorCode::InactiveApproval);
-        require_keys_eq!(from_approval.group, from_account.group, ErrorCode::InvalidGroup);
-        require_keys_eq!(from_approval.owner, from_account.owner, ErrorCode::AccessDenied);
+        let from_approval = load_struct::<TokenApproval>(from_auth)?;
+        verify_approval(&from_approval, &from_account.owner, &from_account.mint.key(), &from_account.group)?;
 
         // Validate network authority data: to
         let to_auth = &ctx.accounts.to_auth.to_account_info();
         require_keys_eq!(*to_auth.owner, to_account.net_auth, ErrorCode::InvalidAuthOwner);
-        let to_approval = load_struct::<TokenGroupApproval>(to_auth)?;
-        require!(to_approval.active, ErrorCode::InactiveApproval);
-        require_keys_eq!(to_approval.group, to_account.group, ErrorCode::InvalidGroup);
-        require_keys_eq!(to_approval.owner, to_account.owner, ErrorCode::AccessDenied);
+        let to_approval = load_struct::<TokenApproval>(to_auth)?;
+        verify_approval(&to_approval, &to_account.owner, &to_account.mint.key(), &to_account.group)?;
 
         // TODO: Check timelock
 

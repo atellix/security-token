@@ -18,7 +18,7 @@ async function main() {
     console.log('Security Token Program: ' + securityTokenPK.toString())
     const mint = anchor.web3.Keypair.generate()
     const owner = provider.wallet.publicKey
-    const group = new PublicKey('91Q2u3RvAp64qB9H84gFnUmwkT1s4MZSXWxu7PMZ6Wre')
+    const group = new PublicKey('DGzjPXnFFNw18FXSuMJVfwBThxBU2ohc2gAwsf2Z6FgA')
     const netauth = new PublicKey('AUTHXb39qs2VyztqH9zqh3LLLVGMzMvvYN3UXQHeJeEH')
     const approval = await programAddress([owner.toBuffer(), group.toBuffer()], netauth)
     var accountId1 = uuidv4()
