@@ -135,6 +135,8 @@ pub mod security_token {
     pub fn create_account(ctx: Context<CreateAccount>,
         inp_uuid: u128,
     ) -> anchor_lang::Result<()> {
+        
+        msg!("Create security token account");
 
         // Verify authority to create token account
         let auth = &ctx.accounts.create_auth.to_account_info();
@@ -200,6 +202,7 @@ pub mod security_token {
         Ok(())
     }
 
+    
     pub fn transfer(ctx: Context<Transfer>,
         inp_amount: u64,
     ) -> anchor_lang::Result<()> {
@@ -561,11 +564,12 @@ pub struct Burn<'info> {
 #[derive(Accounts)]
 #[instruction(inp_uuid: u128)]
 pub struct CreateAccount<'info> {
-    #[account(init_if_needed, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump, payer = owner, space = 209)]
+    #[account(init_if_needed, seeds = [mint.key().as_ref(), owner.key().as_ref(), inp_uuid.to_le_bytes().as_ref()], bump, payer = fee_payer, space = 209)]
     pub account: Account<'info, SecurityTokenAccount>,
     pub mint: Account<'info, SecurityTokenMint>,
-    #[account(mut)]
     pub owner: Signer<'info>,
+    #[account(mut)]
+    pub fee_payer: Signer<'info>,
     pub create_auth: UncheckedAccount<'info>,
     pub close_auth: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
