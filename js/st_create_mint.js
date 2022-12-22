@@ -64,6 +64,7 @@ async function main() {
                     group: group,
                     netAuth: netauth,
                     manager: provider.wallet.publicKey,
+                    feePayer: provider.wallet.publicKey,
                     systemProgram: SystemProgram.programId,
                 }
             }

@@ -1171,7 +1171,6 @@ dependencies = [
 [[package]]
 name = "slab-alloc"
 version = "1.0.0"
-source = "git+https://github.com/atellix/slab-alloc?branch=net-authority#dca3520b6f5d2e9de08416d6655df6477e547f9a"
 dependencies = [
  "arrayref",
  "bytemuck",
