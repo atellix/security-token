@@ -18,4 +18,5 @@ default = ["no-log-ix-name"]
 [dependencies]
 anchor-lang = "0.25.0"
 solana-program = "1.10.29"
-net-authority = { version = "0.1.0", path = "/Users/mfrager/Build/solana/net-authority/programs/net-authority", features = ["cpi"] }
+net-authority = { version = "0.1.0", git = "https://github.com/atellix/net-authority", branch = "token-auth", features = ["cpi"] }
+
