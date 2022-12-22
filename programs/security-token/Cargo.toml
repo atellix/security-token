@@ -1,6 +1,6 @@
 [package]
 name = "security-token"
-version = "1.0.0"
+version = "1.0.1"
 description = "Created with Anchor"
 edition = "2018"
 
@@ -18,5 +18,5 @@ default = ["no-log-ix-name"]
 [dependencies]
 anchor-lang = "0.25.0"
 solana-program = "1.10.29"
-net-authority = { version = "0.1.0", git = "https://github.com/atellix/net-authority", branch = "token-auth", features = ["cpi"] }
+net-authority = { version = "1.0.0", git = "https://github.com/atellix/net-authority", branch = "token-auth", features = ["cpi"] }
 
