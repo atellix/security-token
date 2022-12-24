@@ -4,7 +4,7 @@ use anchor_lang::prelude::*;
 
 use net_authority::{ TokenApproval, TokenApprovalStatus };
 
-declare_id!("8JxtmFxuhmgoEFmBeZAqBVouj6DDQBwybpJnpqcYUU8M");
+declare_id!("STKNhXM8HK7ByThQRX9XzQ1cv4pqtrf6odhCCv3hdJS");
 
 #[inline]
 fn load_struct<T: AccountDeserialize>(acc: &AccountInfo) -> FnResult<T, ProgramError> {
